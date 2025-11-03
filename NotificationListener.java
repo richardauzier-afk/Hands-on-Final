@@ -48,7 +48,7 @@ import java.util.concurrent.Executors;
 
 import javax.inject.Inject;
 
-// 🔹 IMPORT CORRIGIDO
+// 🔹 IMPORT DA HELLOJAVALIB
 import br.edu.ufam.icomp.devtitans.hellojavalib.HelloJavaLib;
 
 /**
@@ -117,11 +117,6 @@ public class NotificationListener extends NotificationListenerWithPlugins implem
         }
         final RankingMap currentRanking = getCurrentRanking();
         mMainExecutor.execute(() -> {
-            // There's currently a race condition between the calls to getActiveNotifications() and
-            // getCurrentRanking(). It's possible for the ranking that we store here to not contain
-            // entries for every notification in getActiveNotifications(). To prevent downstream
-            // crashes, we temporarily fill in these missing rankings with stubs.
-            // See b/146011844 for long-term fix
             final List<Ranking> newRankings = new ArrayList<>();
             for (StatusBarNotification sbn : notifications) {
                 newRankings.add(getRankingOrTemporaryStandIn(currentRanking, sbn.getKey()));
@@ -142,6 +137,17 @@ public class NotificationListener extends NotificationListenerWithPlugins implem
     @Override
     public void onNotificationPosted(final StatusBarNotification sbn,
             final RankingMap rankingMap) {
+        // 🔍 LOG 1: Notificação recebida
+        Log.d(TAG, "========================================");
+        Log.d(TAG, "📬 NOTIFICAÇÃO RECEBIDA!");
+        if (sbn != null) {
+            Log.d(TAG, "📦 Pacote: " + sbn.getPackageName());
+            Log.d(TAG, "🆔 ID: " + sbn.getId());
+            Log.d(TAG, "🏷️ Tag: " + sbn.getTag());
+        } else {
+            Log.d(TAG, "⚠️ StatusBarNotification é NULL!");
+        }
+        
         if (DEBUG) Log.d(TAG, "onNotificationPosted: " + sbn);
 
         if (sbn == null) return;
@@ -150,9 +156,12 @@ public class NotificationListener extends NotificationListenerWithPlugins implem
         String pkg = sbn.getPackageName();
         synchronized (appNotifications) {
             appNotifications.computeIfAbsent(pkg, k -> new java.util.ArrayList<>()).add(sbn);
+            int count = appNotifications.get(pkg).size();
+            Log.d(TAG, "🔢 Total de notificações de " + pkg + ": " + count);
         }
 
         // 🔹 2. Gera ou atualiza notificação-resumo COM IA
+        Log.d(TAG, "🤖 Chamando postSummaryNotificationWithAI para: " + pkg);
         postSummaryNotificationWithAI(pkg);
 
         // 🔹 3. Continua o fluxo normal (SystemUI handlers)
@@ -187,33 +196,45 @@ public class NotificationListener extends NotificationListenerWithPlugins implem
     public void onNotificationRankingUpdate(final RankingMap rankingMap) {
         if (DEBUG) Log.d(TAG, "onRankingUpdate");
         if (rankingMap != null) {
-            // Add the ranking to the queue, then run dispatchRankingUpdate() on the main thread
             RankingMap r = onPluginRankingUpdate(rankingMap);
             mRankingMapQueue.addLast(r);
-            // Maintaining our own queue and always posting the runnable allows us to guarantee the
-            //  relative ordering of all events which are dispatched, which is important so that the
-            //  RankingMap always has exactly the same elements that are current, per add/remove
-            //  events.
             mMainExecutor.execute(mDispatchRankingUpdateRunnable);
         }
     }
 
     // 🔹 MÉTODO NOVO: Processa resumo com IA
     private void postSummaryNotificationWithAI(String pkg) {
-        if (pkg.equals("com.android.systemui")) return;
+        // 🔍 LOG 2: Método chamado
+        Log.d(TAG, "========================================");
+        Log.d(TAG, "🤖 postSummaryNotificationWithAI CHAMADO!");
+        Log.d(TAG, "📦 Pacote: " + pkg);
+        
+        // 🔹 FILTRO: Ignora próprio SystemUI
+        if (pkg.equals("com.android.systemui")) {
+            Log.d(TAG, "⛔ IGNORANDO: Pacote é com.android.systemui (filtro aplicado)");
+            return;
+        }
         
         java.util.List<StatusBarNotification> list;
         synchronized (appNotifications) {
             list = new java.util.ArrayList<>(appNotifications.get(pkg));
         }
 
-        if (list == null || list.isEmpty()) return;
+        if (list == null || list.isEmpty()) {
+            Log.d(TAG, "⚠️ Lista de notificações vazia para " + pkg);
+            return;
+        }
+
+        Log.d(TAG, "📊 Total de notificações: " + list.size());
 
         // Se tem menos de 3 notificações, não vale a pena processar com IA
         if (list.size() < 3) {
+            Log.d(TAG, "📝 Menos de 3 notificações (" + list.size() + "), usando resumo simples");
             postSimpleSummaryNotification(pkg, list);
             return;
         }
+
+        Log.d(TAG, "✅ Threshold atingido! Processando com IA...");
 
         // 🔸 Concatena os textos para enviar à IA
         StringBuilder summaryText = new StringBuilder();
@@ -228,31 +249,41 @@ public class NotificationListener extends NotificationListenerWithPlugins implem
         }
 
         String textoOriginal = summaryText.toString();
+        Log.d(TAG, "📄 Texto concatenado (" + textoOriginal.length() + " chars): " 
+            + textoOriginal.substring(0, Math.min(150, textoOriginal.length())) + "...");
         
         // 🔸 Mostra notificação "processando..." temporária
         postProcessingNotification(pkg, list.size());
 
         // 🔸 Processa com IA em background para não travar a UI
         aiExecutor.execute(() -> {
+            Log.d(TAG, "🧵 Thread IA iniciada para: " + pkg);
+            
             String aiSummary = summaryCache.get(pkg);
             
             // Se não tem cache ou texto mudou, reprocessa
             if (aiSummary == null) {
-                Log.d(TAG, "Processando resumo IA para " + pkg);
+                Log.d(TAG, "💭 Cache vazio. Chamando HelloJavaLib.computePiValue...");
                 aiSummary = helloJavaLib.computePiValue(textoOriginal);
+                Log.d(TAG, "📝 Resultado recebido: " + aiSummary);
                 summaryCache.put(pkg, aiSummary);
+            } else {
+                Log.d(TAG, "💾 Usando resumo do cache");
             }
 
             // Posta a notificação final com o resumo
             final String finalSummary = aiSummary;
-            mMainExecutor.execute(() -> 
-                postFinalSummaryNotification(pkg, list.size(), finalSummary)
-            );
+            mMainExecutor.execute(() -> {
+                Log.d(TAG, "📲 Postando notificação final...");
+                postFinalSummaryNotification(pkg, list.size(), finalSummary);
+            });
         });
     }
 
     // 🔹 MÉTODO NOVO: Notificação temporária enquanto processa
     private void postProcessingNotification(String pkg, int count) {
+        Log.d(TAG, "⏳ Postando notificação de processamento...");
+        
         android.app.Notification notification = new android.app.Notification.Builder(
                 mContext, "systemui_summary_channel")
                 .setContentTitle(pkg + " (" + count + " notificações)")
@@ -260,7 +291,7 @@ public class NotificationListener extends NotificationListenerWithPlugins implem
                 .setSmallIcon(android.R.drawable.ic_popup_sync)
                 .setGroup(pkg)
                 .setGroupSummary(true)
-                .setOngoing(true)  // Não pode ser fechada ainda
+                .setOngoing(true)
                 .build();
 
         try {
@@ -268,13 +299,16 @@ public class NotificationListener extends NotificationListenerWithPlugins implem
                 .getSystemService(android.app.NotificationManager.class);
             ensureChannel(nm);
             nm.notify(pkg.hashCode(), notification);
+            Log.d(TAG, "✅ Notificação de processamento postada");
         } catch (Exception e) {
-            Log.e(TAG, "Erro ao postar notificação de processamento", e);
+            Log.e(TAG, "❌ Erro ao postar notificação de processamento", e);
         }
     }
 
     // 🔹 MÉTODO NOVO: Notificação final com resumo da IA
     private void postFinalSummaryNotification(String pkg, int count, String aiSummary) {
+        Log.d(TAG, "📝 Postando notificação final com resumo...");
+        
         android.app.Notification notification = new android.app.Notification.Builder(
                 mContext, "systemui_summary_channel")
                 .setContentTitle(pkg + " (" + count + " notificações)")
@@ -292,14 +326,17 @@ public class NotificationListener extends NotificationListenerWithPlugins implem
                 .getSystemService(android.app.NotificationManager.class);
             ensureChannel(nm);
             nm.notify(pkg.hashCode(), notification);
+            Log.d(TAG, "✅ Notificação final postada!");
         } catch (Exception e) {
-            Log.e(TAG, "Erro ao postar notificação resumida", e);
+            Log.e(TAG, "❌ Erro ao postar notificação final", e);
         }
     }
 
     // 🔹 MÉTODO NOVO: Resumo simples (sem IA) para poucas notificações
     private void postSimpleSummaryNotification(String pkg, 
             java.util.List<StatusBarNotification> list) {
+        Log.d(TAG, "📋 Postando resumo simples (sem IA)...");
+        
         StringBuilder text = new StringBuilder();
         for (StatusBarNotification n : list) {
             CharSequence t = n.getNotification().extras
@@ -322,14 +359,16 @@ public class NotificationListener extends NotificationListenerWithPlugins implem
                 .getSystemService(android.app.NotificationManager.class);
             ensureChannel(nm);
             nm.notify(pkg.hashCode(), notification);
+            Log.d(TAG, "✅ Resumo simples postado");
         } catch (Exception e) {
-            Log.e(TAG, "Erro ao postar notificação simples", e);
+            Log.e(TAG, "❌ Erro ao postar resumo simples", e);
         }
     }
 
     // 🔹 MÉTODO NOVO: Garante que o canal existe
     private void ensureChannel(android.app.NotificationManager nm) {
         if (nm.getNotificationChannel("systemui_summary_channel") == null) {
+            Log.d(TAG, "📺 Criando canal de notificação...");
             nm.createNotificationChannel(new android.app.NotificationChannel(
                     "systemui_summary_channel",
                     "Resumos Inteligentes",
@@ -338,11 +377,6 @@ public class NotificationListener extends NotificationListenerWithPlugins implem
         }
     }
 
-    /**
-     * This method is (and must be) the sole consumer of the RankingMap queue.  After pulling an
-     * object off the queue, it checks if the queue is empty, and only dispatches the ranking update
-     * if the queue is still empty.
-     */
     private void dispatchRankingUpdate() {
         if (DEBUG) Log.d(TAG, "dispatchRankingUpdate");
         RankingMap r = mRankingMapQueue.pollFirst();
@@ -410,59 +444,36 @@ public class NotificationListener extends NotificationListenerWithPlugins implem
         d.dump("notificationHandlers", mNotificationHandlers);
     }
 
+    public void addNotificationSettingsListener(NotificationSettingsListener listener) {
+        // Método vazio para manter compatibilidade com outros componentes do SystemUI
+    }
+
     private static Ranking getRankingOrTemporaryStandIn(RankingMap rankingMap, String key) {
         Ranking ranking = new Ranking();
         if (!rankingMap.getRanking(key, ranking)) {
             ranking.populate(
                     key,
-                    /* rank= */ 0,
-                    /* matchesInterruptionFilter= */ false,
-                    /* visibilityOverride= */ 0,
-                    /* suppressedVisualEffects= */ 0,
-                    /* importance= */ 0,
-                    /* explanation= */ null,
-                    /* overrideGroupKey= */ null,
-                    /* channel= */ null,
-                    /* overridePeople= */ new ArrayList<>(),
-                    /* snoozeCriteria= */ new ArrayList<>(),
-                    /* showBadge= */ false,
-                    /* userSentiment= */ 0,
-                    /* hidden= */ false,
-                    /* lastAudiblyAlertedMs= */ 0,
-                    /* noisy= */ false,
-                    /* smartActions= */ new ArrayList<>(),
-                    /* smartReplies= */ new ArrayList<>(),
-                    /* canBubble= */ false,
-                    /* isTextChanged= */ false,
-                    /* isConversation= */ false,
-                    /* shortcutInfo= */ null,
-                    /* rankingAdjustment= */ 0,
-                    /* isBubble= */ false,
-                    /* proposedImportance= */ 0,
-                    /* sensitiveContent= */ false
+                    0, false, 0, 0, 0, null, null, null,
+                    new ArrayList<>(), new ArrayList<>(),
+                    false, 0, false, 0, false,
+                    new ArrayList<>(), new ArrayList<>(),
+                    false, false, false, null, 0, false, 0, false
             );
         }
         return ranking;
     }
-    // Adicione este método para compatibilidade
-    public void addNotificationSettingsListener(NotificationSettingsListener listener) {
-        // Método vazio para manter compatibilidade
-    }
-    
+
     @Deprecated
     public interface NotificationSettingsListener {
-
         default void onStatusBarIconsBehaviorChanged(boolean hideSilentStatusIcons) { }
     }
 
-    /** Interface for listening to add/remove events that we receive from NotificationManager. */
     public interface NotificationHandler {
         void onNotificationPosted(StatusBarNotification sbn, RankingMap rankingMap);
         void onNotificationRemoved(StatusBarNotification sbn, RankingMap rankingMap);
         void onNotificationRemoved(StatusBarNotification sbn, RankingMap rankingMap, int reason);
         void onNotificationRankingUpdate(RankingMap rankingMap);
 
-        /** Called after a notification channel is modified. */
         default void onNotificationChannelModified(
                 String pkgName,
                 UserHandle user,
@@ -470,9 +481,6 @@ public class NotificationListener extends NotificationListenerWithPlugins implem
                 int modificationType) {
         }
 
-        /**
-         * Called after the listener has connected to NoMan and posted any current notifications.
-         */
         void onNotificationsInitialized();
     }
 }

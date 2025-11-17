@@ -1,13 +1,9 @@
-package br.edu.ufam.icomp.devtitans.hellojavalib;
-
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.concurrent.TimeUnit;
-
 public class HelloJavaLib {
-
     /**
      * Recebe texto de notificações e retorna um resumo gerado por IA local.
      *
@@ -19,10 +15,8 @@ public class HelloJavaLib {
         if (inputText.length() > 2000) {
             inputText = inputText.substring(0, 2000) + "...";
         }
-
         // Cria o prompt para o modelo
         String prompt = "Resuma as seguintes notificações de forma concisa e clara em português: " + inputText;
-
         String[] commandToExecute = {
             "./litert_lm_main",
             "--backend=cpu",
@@ -31,29 +25,23 @@ public class HelloJavaLib {
             "--max_num_tokens=200",  // Resumo curto
             "--num_cpu_threads=4"
         };
-
         StringBuilder output = new StringBuilder();
-
         try {
             ProcessBuilder processBuilder = new ProcessBuilder(commandToExecute);
             processBuilder.directory(new File("/data/local/temp"));
             Process process = processBuilder.start();
-
             BufferedReader reader = new BufferedReader(
                 new InputStreamReader(process.getInputStream())
             );
-
             String line;
             while ((line = reader.readLine()) != null) {
                 output.append(line).append("\n");
             }
-
             // Timeout de 2 minutos para resumos
             if (!process.waitFor(2, TimeUnit.MINUTES)) {
                 process.destroyForcibly();
                 return "⏱️ Processamento demorou muito. Notificações não resumidas.";
             }
-
             int exitCode = process.exitValue();
             if (exitCode != 0) {
                 BufferedReader errorReader = new BufferedReader(
@@ -65,16 +53,13 @@ public class HelloJavaLib {
                 }
                 return "❌ Erro ao processar resumo.";
             }
-
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
             return "❌ Erro: " + e.getMessage();
         }
-
         String result = output.toString().trim();
         return result.isEmpty() ? "📝 Sem resumo disponível" : result;
     }
-
     /**
      * Versão sem parâmetros (para compatibilidade com código antigo)
      * Retorna mensagem indicando que precisa de texto

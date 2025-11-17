@@ -170,19 +170,3 @@ public class HelloJavaLib {
         }
     }
 }
-```
-
-## Principais adaptações realizadas:
-
-1. **Sistema de Instruções**: Criei uma constante `SYSTEM_INSTRUCTIONS` que replica a estrutura do Python com:
-   - Instruções secretas protegidas
-   - Identidade do assistente adaptada para contexto de notificações
-   - Diretrizes claras de resposta
-
-2. **Formatação de Contexto**: Implementei a mesma estrutura do Python:
-```
-   # Contexto
-   **Data e hora**: [formatada]
-   
-   # Mensagem do usuário
-   [conteúdo]
